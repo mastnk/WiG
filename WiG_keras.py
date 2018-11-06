@@ -6,6 +6,7 @@ from keras import backend as K
 from keras.layers.merge import Multiply
 from keras.layers import Dense, Conv2D
 from keras.initializers import Initializer
+from keras import regularizers
 
 import numpy as np
 
@@ -33,7 +34,7 @@ def to_list(x, allow_tuple=False):
 class WiG_Dense(Dense):
 	def __init__(self, units, gate_activity_regularizer=None, **kwargs):
 		super(WiG_Dense, self).__init__(units, **kwargs)
-		self.gate_activity_regularizer=gate_activity_regularizer
+		self.gate_activity_regularizer=regularizers.get(gate_activity_regularizer)
 	
 	def call(self, x):
 		output = super(WiG_Dense, self).call(x)
@@ -75,7 +76,7 @@ class Identical_Dense(Initializer):
 class WiG_Conv2D(Conv2D):
 	def __init__(self, filters, kernel_size, gate_activity_regularizer=None, **kwargs):
 		super(WiG_Conv2D, self).__init__(filters, kernel_size, **kwargs)
-		self.gate_activity_regularizer=gate_activity_regularizer
+		self.gate_activity_regularizer=regularizers.get(gate_activity_regularizer)
 	
 	def call(self, x):
 		output = super(WiG_Conv2D, self).call(x)
@@ -124,14 +125,19 @@ class Identical_Conv2D(Initializer):
 			'stddev': self.stddev,
 		}
 
+custom_objects={'WiG_Conv2D':WiG_Conv2D, 'WiG_Dense':WiG_Dense, 'Identical_Dense':Identical_Dense, 'Identical_Conv2D':Identical_Conv2D}
+
 ##### SAMPLE #####
 if( __name__ == '__main__' ):
 	from keras.datasets import cifar10
 	from keras.utils import np_utils
 	from keras.layers import Conv2D, Input, Flatten, Dropout, Dense, MaxPooling2D, Activation
 	from keras.regularizers import l1, l2
-	from keras.models import Model
+	from keras.models import Model, load_model
 	from keras.optimizers import Adam
+	from keras.metrics import categorical_accuracy
+	
+	import os
 
 	(X_train, y_train), (X_test, y_test) = cifar10.load_data()
 	Y_train = np_utils.to_categorical(y_train, 10)
@@ -146,63 +152,77 @@ if( __name__ == '__main__' ):
 	Al1 = 1E-8
 	g = 10
 
-#	act = 'WiG'
-	act = 'ReLU'
+	acts = {'ReLU', 'WiG'}
 
-	inp = Input(shape=X_train.shape[1:])
-	x = inp
+	eva = {}
+	for act in acts:
+		model_name = 'cifar_sample_{}.hdf5'.format(act)
+		if( os.path.exists( model_name ) ):
+			model = load_model( model_name, custom_objects=custom_objects )
+		else:
+			inp = Input(shape=X_train.shape[1:])
+			x = inp
+			
+			x = Conv2D( 32, (3,3), padding='same', kernel_initializer='he_normal', kernel_regularizer=l2(Wl2) ) (x)	
+			if( act == 'WiG' ):
+				x = WiG_Conv2D( 32, (3,3), padding='same', kernel_initializer=Identical_Conv2D(g), gate_activity_regularizer=l1(Al1) ) (x)
+			else:
+				x = Activation('relu') (x)
+			
+			x = Conv2D( 32, (3,3), kernel_initializer='he_normal', padding='same', kernel_regularizer=l2(Wl2) ) (x)	
+			if( act == 'WiG' ):
+				x = WiG_Conv2D( 32, (3,3), padding='same', kernel_initializer=Identical_Conv2D(g), gate_activity_regularizer=l1(Al1) ) (x)
+			else:
+				x = Activation('relu') (x)
+
+			x = MaxPooling2D((2,2)) (x)
+
+
+			x = Conv2D( 64, (3,3), padding='same', kernel_initializer='he_normal', kernel_regularizer=l2(Wl2) ) (x)	
+			if( act == 'WiG' ):
+				x = WiG_Conv2D( 64, (3,3), padding='same', kernel_initializer=Identical_Conv2D(g), gate_activity_regularizer=l1(Al1) ) (x)
+			else:
+				x = Activation('relu') (x)
+			
+			x = Conv2D( 64, (3,3), kernel_initializer='he_normal', padding='same', kernel_regularizer=l2(Wl2) ) (x)	
+			if( act == 'WiG' ):
+				x = WiG_Conv2D( 64, (3,3), padding='same', kernel_initializer=Identical_Conv2D(g), gate_activity_regularizer=l1(Al1) ) (x)
+			else:
+				x = Activation('relu') (x)
+
+			x = MaxPooling2D((2,2)) (x)
+			
+			x = Flatten() (x)
+			
+			x = Dropout(0.5) (x)
+			x = Dense(128, kernel_initializer='he_normal', kernel_regularizer=l2(Wl2)) (x)
+			if( act == 'WiG' ):
+				x = WiG_Dense(128, kernel_initializer=Identical_Dense(g), gate_activity_regularizer=l1(Al1) ) (x)
+			else:
+				x = Activation('relu') (x)
+
+			x = Dropout(0.5) (x)
+			x = Dense(128, kernel_initializer='he_normal', kernel_regularizer=l2(Wl2)) (x)
+			if( act == 'WiG' ):
+				x = WiG_Dense(128, kernel_initializer=Identical_Dense(g), gate_activity_regularizer=l1(Al1) ) (x)
+			else:
+				x = Activation('relu') (x)
+
+			x = Dropout(0.5) (x)
+			x = Dense(10, kernel_initializer='he_normal', kernel_regularizer=l2(Wl2)) (x)
+
+			x = Activation('softmax') (x)
+			
+			model = Model(inputs=inp, outputs=x)
+			model.compile(loss='categorical_crossentropy', optimizer=Adam(), metrics=['accuracy', 'categorical_crossentropy'])	
+		
+			model.fit( x=X_train, y=Y_train, batch_size=32, epochs=100, verbose=1, validation_data=(X_test,Y_test ) )
+			model.save( model_name )
+		
+		eva[act] = model.evaluate( x=X_test, y=Y_test, verbose=0 )
 	
-	x = Conv2D( 32, (3,3), padding='same', kernel_initializer='he_normal', kernel_regularizer=l2(Wl2) ) (x)	
-	if( act == 'WiG' ):
-		x = WiG_Conv2D( 32, (3,3), padding='same', kernel_initializer=Identical_Conv2D(g), gate_activity_regularizer=l1(Al1) ) (x)
-	else:
-		x = Activation('relu') (x)
-	
-	x = Conv2D( 32, (3,3), kernel_initializer='he_normal', padding='same', kernel_regularizer=l2(Wl2) ) (x)	
-	if( act == 'WiG' ):
-		x = WiG_Conv2D( 32, (3,3), padding='same', kernel_initializer=Identical_Conv2D(g), gate_activity_regularizer=l1(Al1) ) (x)
-	else:
-		x = Activation('relu') (x)
-
-	x = MaxPooling2D((2,2)) (x)
-
-
-	x = Conv2D( 64, (3,3), padding='same', kernel_initializer='he_normal', kernel_regularizer=l2(Wl2) ) (x)	
-	if( act == 'WiG' ):
-		x = WiG_Conv2D( 64, (3,3), padding='same', kernel_initializer=Identical_Conv2D(g), gate_activity_regularizer=l1(Al1) ) (x)
-	else:
-		x = Activation('relu') (x)
-	
-	x = Conv2D( 64, (3,3), kernel_initializer='he_normal', padding='same', kernel_regularizer=l2(Wl2) ) (x)	
-	if( act == 'WiG' ):
-		x = WiG_Conv2D( 64, (3,3), padding='same', kernel_initializer=Identical_Conv2D(g), gate_activity_regularizer=l1(Al1) ) (x)
-	else:
-		x = Activation('relu') (x)
-
-	x = MaxPooling2D((2,2)) (x)
-	
-	x = Flatten() (x)
-	
-	x = Dropout(0.5) (x)
-	x = Dense(128, kernel_initializer='he_normal', kernel_regularizer=l2(Wl2)) (x)
-	if( act == 'WiG' ):
-		x = WiG_Dense(128, kernel_initializer=Identical_Dense(g), gate_activity_regularizer=l1(Al1) ) (x)
-	else:
-		x = Activation('relu') (x)
-
-	x = Dropout(0.5) (x)
-	x = Dense(128, kernel_initializer='he_normal', kernel_regularizer=l2(Wl2)) (x)
-	if( act == 'WiG' ):
-		x = WiG_Dense(128, kernel_initializer=Identical_Dense(g), gate_activity_regularizer=l1(Al1) ) (x)
-	else:
-		x = Activation('relu') (x)
-
-	x = Dropout(0.5) (x)
-	x = Dense(10, kernel_initializer='he_normal', kernel_regularizer=l2(Wl2)) (x)
-
-	x = Activation('softmax') (x)
-	
-	model = Model(inputs=inp, outputs=x)	
-	model.compile(loss='categorical_crossentropy', optimizer=Adam(), metrics=['accuracy', 'categorical_crossentropy'])	
-	
-	model.fit( x=X_train, y=Y_train, batch_size=32, epochs=100, verbose=1, validation_data=(X_test,Y_test ) )
+	for i in range(1,3):
+		print( 'val_' + model.metrics_names[i] + ':' )
+		for act in acts:
+			print( ' {act:5s}: {eva}'.format(act=act, eva=eva[act][i]) )
+		print()
