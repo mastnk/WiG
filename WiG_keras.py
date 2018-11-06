@@ -226,3 +226,4 @@ if( __name__ == '__main__' ):
 		for act in acts:
 			print( ' {act:5s}: {eva}'.format(act=act, eva=eva[act][i]) )
 		print()
+	print( ' NOTE: This is just sample. The network structure is different from the paper version.' )
