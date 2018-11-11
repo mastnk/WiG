@@ -8,8 +8,6 @@ from keras.layers import Layer, Activation, LeakyReLU, PReLU, ELU, ThresholdedRe
 from WiG import WiG_Dense, WiG_Conv2D
 import os
 
-
-
 class Swish(Layer):
 	def __init__(self, **kwargs):
 		super(Swish, self).__init__(**kwargs)
@@ -36,7 +34,6 @@ class SiL(Layer):
 
 	def compute_output_shape(self, input_shape):
 		return input_shape
-
 
 def get( activation, nb_features = 0, **kwargs ):
 	if( activation == 'WiG_Dense' ):
@@ -76,6 +73,16 @@ def get( activation, nb_features = 0, **kwargs ):
 		return SiL(**kwargs)
 
 	return Activation(activation,**kwargs)
+
+def afterDense( activation, nb_features = 0, **kwargs ):
+	if( activation == 'WiG' ):
+		return get( 'WiG_Dense', nb_features=nb_features, **kwargs )
+	return get( activation, nb_features=nb_features, **kwargs )
+
+def afterConv2D( activation, nb_features = 0, **kwargs ):
+	if( activation == 'WiG' ):
+		return get( 'WiG_Conv2D', nb_features=nb_features, **kwargs )
+	return get( activation, nb_features=nb_features, **kwargs )
 
 
 custom_objects = {'WiG_Conv2D':WiG_Conv2D, 'WiG_Dense':WiG_Dense, 'SiL':SiL, 'Swish': Swish}
